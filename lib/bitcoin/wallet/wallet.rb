@@ -64,7 +64,6 @@ module Bitcoin::Wallet
       tx = @storage.get_tx(tx_hash)
       unless tx
         log.warn { "Received tx #{response['hash']} but not found in storage" }
-        binding.pry
         return false
       end
       addrs = @keystore.keys.map {|k| k[:addr] }
