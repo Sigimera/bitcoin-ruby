@@ -8,7 +8,10 @@ PROJECT_SPECS = ( FileList['spec/bitcoin/bitcoin_spec.rb'] +
                   FileList['spec/bitcoin/protocol/*_spec.rb'] +
                   FileList['spec/bitcoin/script/*_spec.rb'] +
                   FileList['spec/bitcoin/wallet/*_spec.rb'] +
-                  FileList['spec/bitcoin/storage/*_spec.rb'] +
+                  ['spec/bitcoin/storage/storage_spec.rb',
+                   'spec/bitcoin/storage/reorg_spec.rb',
+                   'spec/bitcoin/storage/validation_spec.rb'] +
+                  FileList['spec/bitcoin/node/*_spec.rb'] +
                   FileList['spec/bitcoin/*_spec.rb'] ).uniq
 
 RUBY = 'ruby' unless defined?(RUBY)
@@ -89,9 +92,8 @@ end
 desc 'Generate RDoc documentation'
 task :rdoc do
   `rm -rf rdoc`
-  system("rdoc -o rdoc -m README.rdoc examples/ doc/ lib/ README.rdoc COPYING")
+  system("rdoc -a -A -H -t 'bitcoin-ruby RDoc' -W 'http://github.com/mhanne/bitcoin-ruby/tree/master/%s' -o rdoc -m README.rdoc examples/ doc/ lib/ README.rdoc COPYING")
 end
-
 
 desc 'Generate test coverage report'
 task :coverage do
