@@ -278,6 +278,30 @@ module Bitcoin
       Bitcoin::OpenSSL_EC.regenerate_key(private_key)[1]
     end
 
+    def bitcoin_signed_message_hash(message)
+      # TODO: this will fail horribly on messages with len > 255. It's a cheap implementation of Bitcoin's CDataStream.
+      data = "\x18Bitcoin Signed Message:\n" + [message.bytesize].pack("C") + message
+      Digest::SHA256.digest(Digest::SHA256.digest(data))
+    end
+
+    def sign_message(private_key_hex, public_key_hex, message)
+      hash = bitcoin_signed_message_hash(message)
+      signature = Bitcoin::OpenSSL_EC.sign_compact(hash, private_key_hex, public_key_hex)
+      { 'address' => pubkey_to_address(public_key_hex), 'message' => message, 'signature' => [ signature ].pack("m0") }
+    end
+
+    def verify_message(address, signature, message)
+      hash = bitcoin_signed_message_hash(message)
+      signature = signature.unpack("m0")[0] rescue nil # decode base64
+      raise "invalid address"           unless valid_address?(address)
+      raise "malformed base64 encoding" unless signature
+      raise "malformed signature"       unless signature.bytesize == 65
+      pubkey = Bitcoin::OpenSSL_EC.recover_compact(hash, signature)
+      pubkey_to_address(pubkey) == address if pubkey
+    rescue Exception => ex
+      p [ex.message, ex.backtrace]; false
+    end
+
 
     RETARGET_INTERVAL = 2016
 
@@ -361,6 +385,7 @@ module Bitcoin
     class PKey::EC
       def private_key_hex; private_key.to_hex.rjust(64, '0'); end
       def public_key_hex;  public_key.to_hex.rjust(130, '0'); end
+      def pubkey_compressed?; public_key.group.point_conversion_form == :compressed; end
     end
     class PKey::EC::Point
       def self.from_hex(group, hex)
@@ -395,7 +420,7 @@ module Bitcoin
     @network
   end
 
-  [:bitcoin, :namecoin, :litecoin, :ppcoin, :freicoin].each do |n|
+  [:bitcoin, :namecoin, :litecoin, :freicoin].each do |n|
     instance_eval "def #{n}?; network_project == :#{n}; end"
   end
 
@@ -489,41 +514,6 @@ module Bitcoin
       }
     },
 
-    :ppcoin => {
-      :project => :ppcoin,
-      :magic_head => "\xe6\xe8\xe9\xe5",
-      :address_version => "37",
-      :p2sh_version => "75",
-      :privkey_version => "b7",
-      :default_port => 9901,
-      :protocol_version => 60002,
-      :dns_seeds => [ "seed.ppcoin.net" ],
-      :genesis_hash => "0000000032fe677166d54963b62a4677d8957e87c508eaa4fd7eb1c880cd27e3",
-      :proof_of_work_limit => 0,
-      :alert_pubkeys => [],
-      :known_nodes => [ "theseven.bounceme.net", "cryptocoinexplorer.com" ],
-      :checkpoints => {
-        19080 => "000000000000bca54d9ac17881f94193fd6a270c1bb21c3bf0b37f588a40dbd7",
-        30583 => "d39d1481a7eecba48932ea5913be58ad3894c7ee6d5a8ba8abeb772c66a6696e",
-      }
-    },
-
-    :ppcoin_testnet => {
-      :project => :ppcoin,
-      :magic_head => "\xcb\xf2\xc0\xef",
-      :address_version => "6f",
-      :p2sh_version => "c4",
-      :privkey_version => "ef",
-      :default_port => 9903,
-      :protocol_version => 60002,
-      :dns_seeds => [ "tnseed.ppcoin.net" ],
-      :genesis_hash => "00000001f757bb737f6596503e17cd17b0658ce630cc727c0cca81aec47c9f06",
-      :proof_of_work_limit => 0,
-      :alert_pubkeys => [],
-      :known_nodes => [],
-      :checkpoints => {}
-    },
-
     :litecoin => {
       :project => :litecoin,
       :magic_head => "\xfb\xc0\xb6\xdb",
@@ -533,9 +523,11 @@ module Bitcoin
       :default_port => 9333,
       :protocol_version => 60002,
       :dns_seeds => [
+        "dnsseed.litecointools.com",
         "dnsseed.litecoinpool.org",
-        "dnsseed.bytesized-vps.com",
         "dnsseed.ltc.xurious.com",
+        "dnsseed.koin-project.com",
+        "dnsseed.weminemnc.com",
       ],
       :genesis_hash => "12a765e31ffd4059bada1e25190f6e98c99d9714d334efa41a195a7e7e04bfe2",
       :proof_of_work_limit => 0,
@@ -554,6 +546,8 @@ module Bitcoin
         120000 => "bd9d26924f05f6daa7f0155f32828ec89e8e29cee9e7121b026a7a3552ac6131",
         161500 => "dbe89880474f4bb4f75c227c77ba1cdc024991123b28b8418dbbf7798471ff43",
         179620 => "2ad9c65c990ac00426d18e446e0fd7be2ffa69e9a7dcb28358a50b2b78b9f709",
+        240000 => "7140d1c4b4c2157ca217ee7636f24c9c73db39c4590c4e6eab2e3ea1555088aa",
+        383640 => "2b6809f094a9215bafc65eb3f110a35127a34be94b7d0590a096c3f126c6f364",
       }
     },
 
@@ -565,7 +559,10 @@ module Bitcoin
       :privkey_version => "ef",
       :default_port => 19333,
       :protocol_version => 60002,
-      :dns_seeds => [],
+      :dns_seeds => [
+        "testnet-seed.litecointools.com",
+        "testnet-seed.weminemnc.com",
+      ],
       :genesis_hash => "f5ae71e26c74beacc88382716aced69cddf3dffff24f384e1808905e0188f68f",
       :proof_of_work_limit => 0,
       :alert_pubkeys => [],
@@ -602,7 +599,8 @@ module Bitcoin
       :dns_seeds => [],
       :genesis_hash => "000000000062b72c5e2ceb45fbc8587e807c155b0da735e6483dfba2f0a9c770",
       :proof_of_work_limit => 0x1d00ffff,
-      :known_nodes => ["bitcoin.tunl.in"],
+      :known_nodes => ["bitcoin.tunl.in", "webbtc.com", "178.32.31.41",
+                      "78.47.86.43", "69.164.206.88", ""],
       :checkpoints => {
         0 => "000000000062b72c5e2ceb45fbc8587e807c155b0da735e6483dfba2f0a9c770",
         19200 => "d8a7c3e01e1e95bcee015e6fcc7583a2ca60b79e5a3aa0a171eddd344ada903d",

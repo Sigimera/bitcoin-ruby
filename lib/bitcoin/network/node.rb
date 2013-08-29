@@ -54,7 +54,6 @@ module Bitcoin::Network
       :storage => "sequel::sqlite://~/.bitcoin-ruby/<network>/blocks.db",
       :mode => :full,
       :dns => true,
-      :epoll => false,
       :epoll_limit => 10000,
       :epoll_user => nil,
       :addr_file => "~/.bitcoin-ruby/<network>/peers.json",
@@ -70,7 +69,7 @@ module Bitcoin::Network
         :queue => 501,
         :inv => 501,
         :inv_cache => 0,
-        :unconfirmed => 3
+        :unconfirmed => 100,
       },
       :intervals => {
         :queue => 1,
@@ -170,6 +169,17 @@ module Bitcoin::Network
       end
     end
 
+    # initiate epoll with given file descriptor and set effective user
+    def epoll_init
+      log.info { "EPOLL: Available file descriptors: " +
+        EM.set_descriptor_table_size(@config[:epoll_limit]).to_s }
+      if @config[:epoll_user]
+        EM.set_effective_user(@config[:epoll_user])
+        log.info { "EPOLL: Effective user set to: #{@config[:epoll_user]}" }
+      end
+      EM.epoll = true
+    end
+
     def run
       @started = Time.now
 
@@ -178,7 +188,17 @@ module Bitcoin::Network
         log.info { "Bye" }
       end
 
-      init_epoll  if @config[:epoll]
+      # enable kqueue (BSD, OS X)
+      if EM.kqueue?
+        log.info { 'Using BSD kqueue' }
+        EM.kqueue = true
+      end
+
+      # enable epoll (Linux)
+      if EM.epoll?
+        log.info { 'Using Linux epoll' }
+        epoll_init
+      end
 
       EM.run do
 
@@ -310,7 +330,7 @@ module Bitcoin::Network
     # check for new items in the queue and process them
     def work_queue
       @log.debug { "queue worker running" }
-      return  if @queue.size == 0
+      return getblocks  if @queue.size == 0
 
       while obj = @queue.shift
         begin
@@ -321,18 +341,20 @@ module Bitcoin::Network
                 push_notification(:block, [obj[1], res[0]])
                 obj[1].tx.each {|tx| @unconfirmed.delete(tx.hash) }
               end
-              getblocks  if res[1] == 2
+              getblocks  if res[1] == 2 && @store.in_sync?
             end
           else
             drop = @unconfirmed.size - @config[:max][:unconfirmed] + 1
             drop.times { @unconfirmed.shift }  if drop > 0
-            @unconfirmed[obj[1].hash] = obj[1]
-            push_notification(:tx, [obj[1], 0])
+            unless @unconfirmed[obj[1].hash]
+              @unconfirmed[obj[1].hash] = obj[1]
+              push_notification(:tx, [obj[1], 0])
 
-            if @notifiers[:output]
-              obj[1].out.each do |out|
-                address = Bitcoin::Script.new(out.pk_script).get_address
-                push_notification(:output, [obj[1].hash, address, out.value, 0])
+              if @notifiers[:output]
+                obj[1].out.each do |out|
+                  address = Bitcoin::Script.new(out.pk_script).get_address
+                  push_notification(:output, [obj[1].hash, address, out.value, 0])
+                end
               end
             end
           end
@@ -355,7 +377,7 @@ module Bitcoin::Network
       @log.debug { "inv queue worker running" }
       return  if @queue.size >= @config[:max][:queue]
       while inv = @inv_queue.shift
-        next  if !@store.in_sync? && inv[0] == :tx
+        next  if !@store.in_sync? && inv[0] == :tx && @notifiers.empty?
         next  if @queue.map{|i|i[1]}.map(&:hash).include?(inv[1])
         inv[2].send("send_getdata_#{inv[0]}", inv[1])
       end
@@ -374,18 +396,6 @@ module Bitcoin::Network
 #        (!@store.in_sync? && inv[0] == :tx)
 #      @inv_cache << [inv[0], inv[1]]
       @inv_queue << inv
-    end
-
-
-    # initiate epoll with given file descriptor and set effective user
-    def init_epoll
-      log.info { "EPOLL: Available file descriptors: " +
-        EM.set_descriptor_table_size(@config[:epoll_limit]).to_s }
-      if @config[:epoll_user]
-        EM.set_effective_user(@config[:epoll_user])
-        log.info { "EPOLL: Effective user set to: #{@config[:epoll_user]}" }
-      end
-      EM.epoll
     end
 
     def relay_tx(tx)
@@ -414,13 +424,22 @@ module Bitcoin::Network
       @config[:listen].split(":")[0]
     end
 
+    # push notification +message+ to +channel+
     def push_notification channel, message
       @notifiers[channel.to_sym].push(message)  if @notifiers[channel.to_sym]
     end
 
+    # subscribe to notification +channel+.
+    # available channels are: block, tx, output, connection.
+    # see CommandHandler for details.
     def subscribe channel
       @notifiers[channel.to_sym] ||= EM::Channel.new
       @notifiers[channel.to_sym].subscribe {|*data| yield(*data) }
+    end
+
+    # should the node accept new incoming connections?
+    def accept_connections?
+      connections.select(&:incoming?).size >= config[:max][:connections_in]
     end
 
   end

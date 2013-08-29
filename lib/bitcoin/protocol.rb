@@ -19,9 +19,10 @@ module Bitcoin
     autoload :Handler, 'bitcoin/protocol/handler'
     autoload :Parser,  'bitcoin/protocol/parser'
 
-    DNS_Seed = [ "bitseed.xf2.org", "bitseed.bitcoin.org.uk" ]
     Uniq = rand(0xffffffffffffffff)
 
+    # var_int refers to https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer and is what Satoshi called "CompactSize"
+    # BitcoinQT has later added even more compact format called CVarInt to use in its local block storage. CVarInt is not implemented here.
     def self.unpack_var_int(payload)
       case payload.unpack("C")[0] # TODO add test cases
       when 0xfd; payload.unpack("xva*")
@@ -82,8 +83,8 @@ module Bitcoin
       cmd      = command.ljust(12, "\x00")[0...12]
       length   = [payload.bytesize].pack("V")
       checksum = Digest::SHA256.digest(Digest::SHA256.digest(payload))[0...4]
-
-      [Bitcoin.network[:magic_head].force_encoding(BINARY), cmd.force_encoding(BINARY), length, checksum, payload.force_encoding(BINARY)].join
+      pkt      = "".force_encoding(BINARY)
+      pkt << Bitcoin.network[:magic_head].force_encoding(BINARY) << cmd.force_encoding(BINARY) << length << checksum << payload.force_encoding(BINARY)
     end
 
     def self.version_pkt(from_id, from=nil, to=nil, last_block=nil, time=nil, user_agent=nil, version=nil)

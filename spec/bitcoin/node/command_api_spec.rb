@@ -149,7 +149,9 @@ describe 'Node Command API' do
       tx.in[0].script_sig.should == ""
       -> { tx.verify_input_signature(0, @block.tx[0]) }.should.raise(TypeError)
 
-      res[1].each.with_index do |sig_hash, idx|
+      res[1].each.with_index do |sig_data, idx|
+        sig_hash, sig_addr = *sig_data
+        sig_addr.should == @key.addr
         sig = @key.sign(sig_hash.htb)
         script_sig = Script.to_signature_pubkey_script(sig, @key.pub.htb)
         tx.in[idx].script_sig_length = script_sig.bytesize
@@ -165,7 +167,9 @@ describe 'Node Command API' do
       tx.is_a?(P::Tx).should == true
       -> { tx.verify_input_signature(0, @block.tx[0]) }.should.raise(TypeError)
 
-      res[1].each.with_index do |sig_hash, idx|
+      res[1].each.with_index do |sig_data, idx|
+        sig_hash, sig_addr = *sig_data
+        sig_addr.should == @key.addr
         sig = @key.sign(sig_hash.htb)
         script_sig = Script.to_signature_pubkey_script(sig, @key.pub.htb)
         tx.in[idx].script_sig_length = script_sig.bytesize
@@ -188,6 +192,8 @@ describe 'Node Command API' do
         t.output {|o| o.value 50e8; o.script {|s| s.recipient @key.addr } }
       end
       sig = @key.sign(tx.in[0].sig_hash)
+      test_command("store_block", [@block.to_payload.hth])
+      sleep 0.1
       res = test_command("assemble_tx", [tx.to_payload.hth, [[sig.hth, @key.pub]]])
       tx = Bitcoin::P::Tx.new(res.htb)
       tx.verify_input_signature(0, @block.tx[0]).should == true

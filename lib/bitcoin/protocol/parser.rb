@@ -76,7 +76,7 @@ module Bitcoin
         when 'getdata';  parse_inv(payload, :get)
         when 'addr';     parse_addr(payload)
         when 'getaddr';  @h.on_getaddr  if @h.respond_to?(:on_getaddr)
-        when 'verack';   @h.on_handshake_complete # nop
+        when 'verack';   @h.respond_to?(:on_verack) ? @h.on_verack : (@h.respond_to?(:on_handshake_complete) ? @h.on_handshake_complete : nil)
         when 'version';  parse_version(payload)
         when 'alert';    parse_alert(payload)
         when 'ping';     @h.on_ping(payload.unpack("Q")[0])
@@ -86,7 +86,7 @@ module Bitcoin
         when 'mempool';  handle_mempool_request(payload)
         when 'notfound'; handle_notfound_reply(payload)
         else
-          p ['unkown-packet', command, payload]
+          p ['unknown-packet', command, payload]
         end
       end
 
@@ -103,7 +103,7 @@ module Bitcoin
       # https://en.bitcoin.it/wiki/BIP_0035
       def handle_mempool_request(payload)
         return unless @version[:version] >= 60002           # Protocol version >= 60002
-        return unless (@version[:services] & (1 << 0)) == 1 # NODE_NETWORK bit set in Services
+        return unless (@version[:services] & Bitcoin::Protocol::Version::NODE_NETWORK) == 1 # NODE_NETWORK bit set in Services
         @h.on_mempool if @h.respond_to?(:on_mempool)
       end
 
