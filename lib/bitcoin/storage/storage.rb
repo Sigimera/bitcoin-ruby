@@ -93,7 +93,7 @@ module Bitcoin::Storage
         @db = Sequel.connect(@config[:db].sub("~", ENV["HOME"]))
         @db.extend_datasets(Sequel::Sequel3DatasetMethods)
         sqlite_pragmas; migrate; check_metadata
-        log.info { "opened database #{@db.uri}" }
+        log.info { "opened #{backend_name} store #{@db.uri}" }
       end
 
       # check if schema is up to date and migrate to current version if necessary
@@ -117,6 +117,11 @@ module Bitcoin::Storage
           raise "Error: DB #{@db.url} was created for '#{name}' network!"
         end
         unless version[:backend] == backend_name
+          if version[:backend] == "sequel" && backend_name == "utxo"
+            log.warn { "Note: The 'utxo' store is now the default backend.
+            To keep using the full storage, change the configuration to use storage: 'sequel::#{@db.url}'.
+            To use the new storage backend, delete or move #{@db.url}, or specify a different database path in the config." }
+          end
           raise "Error: DB #{@db.url} was created for '#{version[:backend]}' backend!"
         end
       end
@@ -271,14 +276,13 @@ module Bitcoin::Storage
       def get_locator pointer = get_head
         if @locator
           locator, head = @locator
-          if head == get_head
+          if head == pointer
             return locator
           end
         end
 
         return [("\x00"*32).hth]  if get_depth == -1
-        locator = []
-        step = 1
+        locator, step, orig_pointer = [], 1, pointer
         while pointer && pointer.hash != Bitcoin::network[:genesis_hash]
           locator << pointer.hash
           depth = pointer.depth - step
@@ -289,7 +293,7 @@ module Bitcoin::Storage
           step *= 2  if locator.size > 10
         end
         locator << Bitcoin::network[:genesis_hash]
-        @locator = [locator, get_head]
+        @locator = [locator, orig_pointer]
         locator
       end
 
