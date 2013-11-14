@@ -68,7 +68,7 @@ module Bitcoin
       end
 
       # parse raw binary data
-      def parse_data_from_io(buf)
+      def parse_data_from_io(buf, header_only=false)
         buf = buf.is_a?(String) ? StringIO.new(buf) : buf
         @ver, @prev_block, @mrkl_root, @time, @bits, @nonce = buf.read(80).unpack("Va32a32VVV")
         recalc_block_hash
@@ -81,6 +81,9 @@ module Bitcoin
         return buf if buf.eof?
 
         tx_size = Protocol.unpack_var_int_from_io(buf)
+        @tx_count = tx_size
+        return buf if header_only
+
         tx_size.times{  break if payload == true
           t = Tx.new(nil)
           payload = t.parse_data_from_io(buf)
@@ -150,10 +153,15 @@ module Bitcoin
       # introduced in block version 2 by BIP_0034
       # blockchain height as seen by the block itself.
       # do not trust this value, instead verify with chain storage.
-      def bip34_block_height
+      def bip34_block_height(height=nil)
         return nil unless @ver >= 2
-        coinbase = @tx.first.inputs.first.script_sig
-        coinbase[1..coinbase[0].ord].ljust(4, "\x00").unpack("V").first
+        if height # generate height binary
+          buf = [height].pack("V").gsub(/\x00+$/,"")
+          [buf.bytesize, buf].pack("Ca*")
+        else
+          coinbase = @tx.first.inputs.first.script_sig
+          coinbase[1..coinbase[0].ord].ljust(4, "\x00").unpack("V").first
+        end
       rescue
         nil
       end

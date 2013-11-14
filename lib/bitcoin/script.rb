@@ -12,6 +12,7 @@ class Bitcoin::Script
   OP_PUSHDATA1   = 76
   OP_PUSHDATA2   = 77
   OP_PUSHDATA4   = 78
+  OP_PUSHDATA_INVALID = 238 # 0xEE
   OP_NOP         = 97
   OP_DUP         = 118
   OP_HASH160     = 169
@@ -162,6 +163,8 @@ class Bitcoin::Script
         if len == 1 && tmp <= 22
           chunks.last.bitcoin_pushdata = OP_PUSHDATA0
           chunks.last.bitcoin_pushdata_length = len
+        else
+          raise "invalid OP_PUSHDATA0" if len != chunks.last.bytesize
         end
       elsif (opcode == OP_PUSHDATA1)
         len = program.shift(1)[0]
@@ -170,6 +173,8 @@ class Bitcoin::Script
         unless len > OP_PUSHDATA1 && len <= 0xff
           chunks.last.bitcoin_pushdata = OP_PUSHDATA1
           chunks.last.bitcoin_pushdata_length = len
+        else
+          raise "invalid OP_PUSHDATA1" if len != chunks.last.bytesize
         end
       elsif (opcode == OP_PUSHDATA2)
         len = program.shift(2).pack("C*").unpack("v")[0]
@@ -178,6 +183,8 @@ class Bitcoin::Script
         unless len > 0xff && len <= 0xffff
           chunks.last.bitcoin_pushdata = OP_PUSHDATA2
           chunks.last.bitcoin_pushdata_length = len
+        else
+          raise "invalid OP_PUSHDATA2" if len != chunks.last.bytesize
         end
       elsif (opcode == OP_PUSHDATA4)
         len = program.shift(4).pack("C*").unpack("V")[0]
@@ -186,12 +193,21 @@ class Bitcoin::Script
         unless len > 0xffff # && len <= 0xffffffff
           chunks.last.bitcoin_pushdata = OP_PUSHDATA4
           chunks.last.bitcoin_pushdata_length = len
+        else
+          raise "invalid OP_PUSHDATA4" if len != chunks.last.bytesize
         end
       else
         chunks << opcode
       end
     end
     chunks
+  rescue Exception => ex
+    # bail out! #run returns false but serialization roundtrips still create the right payload.
+    @parse_invalid = true
+    c = bytes.unpack("C*").pack("C*")
+    c.bitcoin_pushdata = OP_PUSHDATA_INVALID
+    c.bitcoin_pushdata_length = c.bytesize
+    chunks = [ c ]
   end
 
   # string representation of the script
@@ -262,6 +278,8 @@ class Bitcoin::Script
       [OP_PUSHDATA2, len].pack("Cv") + data
     when OP_PUSHDATA4
       [OP_PUSHDATA4, len].pack("CV") + data
+    when OP_PUSHDATA_INVALID
+      data
     else # OP_PUSHDATA0
       [len].pack("C") + data
     end
@@ -311,6 +329,8 @@ class Bitcoin::Script
 
   # run the script. +check_callback+ is called for OP_CHECKSIG operations
   def run(block_timestamp=Time.now.to_i, &check_callback)
+    return false if @parse_invalid
+
     #p [to_string, block_timestamp, is_p2sh?]
     @script_invalid = true if @raw.bytesize > 10_000
 
@@ -328,12 +348,15 @@ class Bitcoin::Script
 
       case chunk
       when Fixnum
+        if DISABLED_OPCODES.include?(chunk)
+          @script_invalid = true
+          @debug << "DISABLED_#{OPCODES[chunk]}"
+          break
+        end
+
         next unless (@do_exec || (OP_IF <= chunk && chunk <= OP_ENDIF))
 
         case chunk
-        when *DISABLED_OPCODES
-          @script_invalid = true
-          @debug << "DISABLED_#{OPCODES[chunk]}"
         when *OPCODES_METHOD.keys
           m = method( n=OPCODES_METHOD[chunk] )
           @debug << n.to_s.upcase
@@ -381,10 +404,10 @@ class Bitcoin::Script
   def pay_to_script_hash(check_callback)
     return false if @chunks.size < 4
     *rest, script, _, script_hash, _ = @chunks
+    script, script_hash = cast_to_string(script), cast_to_string(script_hash)
 
-    return false unless [script, script_hash].all?{|i| i.is_a?(String) }
     return false unless Bitcoin.hash160(script.unpack("H*")[0]) == script_hash.unpack("H*")[0]
-    rest.delete_at(0) if rest[0] == 0
+    rest.delete_at(0) if rest[0] && cast_to_bignum(rest[0]) == 0
 
     script = self.class.new(to_binary(rest) + script).inner_p2sh!(script)
     result = script.run(&check_callback)
@@ -526,6 +549,7 @@ class Bitcoin::Script
   def self.to_pubkey_script_sig(signature, pubkey)
     hash_type = "\x01"
     #pubkey = [pubkey].pack("H*") if pubkey.bytesize != 65
+    return [ [signature.bytesize+1].pack("C"), signature, hash_type ].join unless pubkey
 
     case pubkey[0]
     when "\x04"
@@ -914,7 +938,7 @@ class Bitcoin::Script
 
   # Transaction is invalid unless occuring in an unexecuted OP_IF branch
   def op_ver
-    # skipped, not defined in origin script.cpp
+    invalid if @do_exec
   end
 
   def pop_int(count=nil)
@@ -968,8 +992,14 @@ class Bitcoin::Script
   def op_checksig(check_callback)
     return invalid if @stack.size < 2
     pubkey = @stack.pop
+    #return (@stack << 0) unless Bitcoin::Script.is_canonical_pubkey?(pubkey) # only for isStandard
     drop_sigs      = [ @stack[-1] ]
-    sig, hash_type = parse_sig(@stack.pop)
+
+    signature = cast_to_string(@stack.pop)
+    #return (@stack << 0) unless Bitcoin::Script.is_canonical_signature?(signature) # only for isStandard
+    return (@stack << 0) if signature == ""
+
+    sig, hash_type = parse_sig(signature)
 
     if inner_p2sh?
       script_code = @inner_script_code || to_binary_without_signatures(drop_sigs)
@@ -1014,9 +1044,9 @@ class Bitcoin::Script
     n_sigs = pop_int
     return invalid  unless (0..n_pubkeys).include?(n_sigs)
     return invalid  unless @stack.last(n_sigs).all?{|e| e.is_a?(String) && e != '' }
-    sigs = (drop_sigs = pop_string(n_sigs)).map{|s| parse_sig(s) }
+    sigs = drop_sigs = pop_string(n_sigs)
 
-    @stack.pop if @stack[-1] == '' # remove OP_NOP from stack
+    @stack.pop if @stack[-1] && cast_to_bignum(@stack[-1]) == 0 # remove OP_0 from stack
 
     if inner_p2sh?
       script_code = @inner_script_code || to_binary_without_signatures(drop_sigs)
@@ -1026,8 +1056,10 @@ class Bitcoin::Script
     end
 
     valid_sigs = 0
-    sigs.each{|sig, hash_type| pubkeys.each{|pubkey|
-        valid_sigs += 1  if check_callback.call(pubkey, sig, hash_type, drop_sigs, script_code)
+    sigs.each{|sig| pubkeys.each{|pubkey|
+        next if sig == ""
+        signature, hash_type = parse_sig(sig)
+        valid_sigs += 1  if check_callback.call(pubkey, signature, hash_type, drop_sigs, script_code)
       }}
 
     @stack << ((valid_sigs >= n_sigs) ? 1 : (invalid; 0))
