@@ -3,7 +3,7 @@ source "http://rubygems.org"
 # Specify your gem's dependencies in bitcoin-ruby.gemspec
 gemspec
 
-group :test do 
+group :test do
   gem 'sqlite3', :platforms => :ruby
 
   gem 'bacon', '>= 1.2.0'
@@ -17,8 +17,9 @@ group :development do
   gem 'ffi'
   gem 'log4r'
   gem 'sequel'
+  gem 'em-dns'
 
-  gem 'sqlite3', :platforms => :ruby, :require => false
+  #gem 'sqlite3', :platforms => :ruby, :require => false
   gem 'pg', :platforms => :ruby, :require => false
 
   gem "rake", ">= 0.8.0"
