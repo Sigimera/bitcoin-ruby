@@ -13,14 +13,15 @@ group :test do
 end
 
 group :development do
-  gem 'eventmachine'
-  gem 'ffi'
-  gem 'log4r'
-  gem 'sequel'
-  gem 'em-dns'
 
   #gem 'sqlite3', :platforms => :ruby, :require => false
-  gem 'pg', :platforms => :ruby, :require => false
 
   gem "rake", ">= 0.8.0"
 end
+
+gem 'ffi'
+gem 'eventmachine'
+gem 'sequel'
+gem 'em-dns'
+gem 'pg', :platforms => :ruby, :require => false
+gem 'log4r'
