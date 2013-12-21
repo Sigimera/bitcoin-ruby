@@ -112,7 +112,15 @@ module Bitcoin
     end
 
     def hash160_to_address(hex)
-      hex = address_version + hex
+      encode_address hex, address_version
+    end
+
+    def hash160_to_p2sh_address(hex)
+      encode_address hex, p2sh_version
+    end
+
+    def encode_address(hex, version)
+      hex = version + hex
       encode_base58(hex + checksum(hex))
     end
 
@@ -448,7 +456,7 @@ module Bitcoin
       :retarget_interval => 2016,
       :retarget_time => 1209600, # 2 weeks
       :max_money => 21_000_000 * COIN,
-      :min_tx_fee => 50_000,
+      :min_tx_fee => 10_000,
       :min_relay_tx_fee => 10_000,
       :dns_seeds => [
         "seed.bitcoin.sipa.be",
@@ -497,7 +505,7 @@ module Bitcoin
       :retarget_interval => 2016,
       :retarget_time => 1209600, # 2 weeks
       :max_money => 21_000_000 * COIN,
-      :min_tx_fee => 50_000,
+      :min_tx_fee => 10_000,
       :min_relay_tx_fee => 10_000,
     },
 
@@ -513,7 +521,7 @@ module Bitcoin
       :retarget_interval => 2016,
       :retarget_time => 1209600, # 2 weeks
       :max_money => 21_000_000 * COIN,
-      :min_tx_fee => 50_000,
+      :min_tx_fee => 10_000,
       :min_relay_tx_fee => 10_000,
       :dns_seeds => [
         "testnet-seed.bitcoin.petertodd.org",
@@ -535,7 +543,7 @@ module Bitcoin
       :magic_head => "\xfb\xc0\xb6\xdb",
       :address_version => "30",
       :p2sh_version => "05",
-      :privkey_version => "ef",
+      :privkey_version => "b0",
       :default_port => 9333,
       :protocol_version => 60002,
       :max_money => 84_000_000 * COIN,
