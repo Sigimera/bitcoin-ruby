@@ -9,8 +9,8 @@ tmp/
 log/
 rdoc/
 coverage/
-*.yml
 *.conf
 *.db
 .rbx/
 bundle/
+/vendor
