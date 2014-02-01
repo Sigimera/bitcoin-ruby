@@ -181,7 +181,7 @@ module Bitcoin::Storage
           else
             depth = prev_block ? prev_block.depth + 1 : 0
             log.debug { "=> orphan (#{depth})" }
-            return [0, 2]  unless in_sync?
+            return [0, 2]  unless (in_sync? || Bitcoin.network_name =~ /testnet/)
             return persist_block(blk, ORPHAN, depth)
           end
         end
@@ -211,7 +211,6 @@ module Bitcoin::Storage
           head = get_head
           if prev_block.work + blk.block_work  <= head.work
             log.debug { "=> side (#{depth})" }
-            validator.validate(rules: [:context], raise_errors: true)  unless @config[:skip_validation]
             return persist_block(blk, SIDE, depth, prev_block.work)
           else
             log.debug { "=> reorg" }
